@@ -862,9 +862,12 @@
     }
 
     // Boot once so minimap renders; tests run once
-    setupLevel(); runTests(); (function firstDraw(){ const p=state.player; if(!p) return; const mouseWorld={x:state.mouse.x+state.camera.x,y:state.mouse.y+state.camera.y}; draw(lineOfSight(p, mouseWorld, state.walls)); 
+    setupLevel(); runTests(); (function firstDraw(){ const p=state.player; if(!p) return; const mouseWorld={x:state.mouse.x+state.camera.x,y:state.mouse.y+state.camera.y}; draw(lineOfSight(p, mouseWorld, state.walls)); })();
+
+  })();
 
     <!-- ===== ADMIN PANEL (paste this right above </body>) ===== -->
+<style>
   #adminBtn{position:fixed; right:16px; top:16px; z-index:70}
   #adminPanel{
     display:none; position:fixed; inset:0; z-index:80;

@@ -865,6 +865,262 @@
     setupLevel(); runTests(); (function firstDraw(){ const p=state.player; if(!p) return; const mouseWorld={x:state.mouse.x+state.camera.x,y:state.mouse.y+state.camera.y}; draw(lineOfSight(p, mouseWorld, state.walls)); })();
 
   })();
+
+    <!-- ===== ADMIN PANEL (paste this right above </body>) ===== -->
+<style>
+  #adminBtn{position:fixed; right:16px; top:16px; z-index:70}
+  #adminPanel{
+    display:none; position:fixed; inset:0; z-index:80;
+    background:#0009; backdrop-filter: blur(2px);
+    color:#e6f0ff; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  }
+  #adminWrap{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(900px,95vw); background:#0f1935f0; border:1px solid #2a3f77; border-radius:16px; padding:16px;
+  }
+  #adminWrap h2{margin:0 0 6px; font-size:16px; letter-spacing:.08em; text-transform:uppercase}
+  #adminWrap .grid{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  #adminWrap .card{border:1px solid #2a3f77; border-radius:12px; padding:10px}
+  #adminWrap label{display:block; margin:6px 0; color:#a9bee8; font-size:12px}
+  #adminWrap input[type="range"]{width:100%}
+  #adminWrap .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  #adminWrap .btn{cursor:pointer; border:1px solid #41508a; background:linear-gradient(180deg,#18234a,#0f1a36);
+    color:#e6f0ff; padding:8px 12px; border-radius:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase}
+  #adminClose{position:absolute; right:12px; top:12px}
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:4px 10px; font-size:12px; color:#9fb2db}
+  .kv div:nth-child(odd){color:#a9bee8}
+</style>
+
+<button id="adminBtn" class="btn">Admin</button>
+
+<div id="adminPanel" aria-hidden="true">
+  <div id="adminWrap">
+    <button id="adminClose" class="btn">Close</button>
+    <h2>Admin Console — Task Force: Eclipse</h2>
+    <div class="grid">
+      <!-- STATS -->
+      <div class="card">
+        <h3 style="margin:0 0 6px; letter-spacing:.08em; text-transform:uppercase; font-size:13px">Performance & Stats</h3>
+        <div class="kv">
+          <div>FPS</div><div id="a_fps">—</div>
+          <div>Frame Time (ms)</div><div id="a_ms">—</div>
+          <div>Bullets</div><div id="a_bullets">—</div>
+          <div>Enemies</div><div id="a_enemies">—</div>
+          <div>Player HP</div><div id="a_hp">—</div>
+          <div>Noise</div><div id="a_noise">—</div>
+          <div>World</div><div id="a_world">—</div>
+          <div>Network</div><div id="a_net">—</div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="a_god" class="btn">God Mode: Off</button>
+          <button id="a_kill" class="btn">Kill All Enemies</button>
+          <button id="a_spawn" class="btn">Spawn Test Enemy</button>
+        </div>
+      </div>
+
+      <!-- AI PROTOCOL -->
+      <div class="card">
+        <h3 style="margin:0 0 6px; letter-spacing:.08em; text-transform:uppercase; font-size:13px">AI Protocol (Live)</h3>
+        <label>View Distance <span id="lab_vd">100%</span>
+          <input id="ai_view" type="range" min="50" max="200" value="100">
+        </label>
+        <label>Hearing Range <span id="lab_hear">100%</span>
+          <input id="ai_hear" type="range" min="50" max="200" value="100">
+        </label>
+        <label>Fire Rate <span id="lab_fire">100%</span>
+          <input id="ai_fire" type="range" min="50" max="200" value="100">
+        </label>
+        <label>Accuracy (lower is better) <span id="lab_acc">100%</span>
+          <input id="ai_acc" type="range" min="50" max="200" value="100">
+        </label>
+        <div class="row" style="margin-top:8px">
+          <button id="ai_apply" class="btn">Apply To Existing</button>
+          <button id="ai_reset" class="btn">Reset</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ——— Password gate ———
+  let __adminOK = false;
+  const PASS = "ElusionOwner951359";
+
+  const $ = id => document.getElementById(id);
+  const adminBtn = $("adminBtn");
+  const panel = $("adminPanel");
+  const closeBtn = $("adminClose");
+
+  function promptAdmin(){
+    if (__adminOK) return true;
+    const p = prompt("Enter admin password:");
+    if (p === PASS){ __adminOK = true; return true; }
+    alert("Access denied.");
+    return false;
+  }
+
+  adminBtn?.addEventListener("click", ()=>{
+    if (!promptAdmin()) return;
+    panel.style.display = "block";
+    panel.setAttribute("aria-hidden","false");
+  });
+  closeBtn?.addEventListener("click", ()=>{
+    panel.style.display = "none";
+    panel.setAttribute("aria-hidden","true");
+  });
+
+  // ——— FPS/Stats sampler ———
+  let lastT = performance.now(), frames=0, fps=0, ms=0;
+  function perfTick(ts){
+    frames++;
+    const dt = ts - lastT;
+    if (dt >= 500){ // half-second window for snappier numbers
+      fps = Math.round(frames * 1000 / dt);
+      ms = (dt / frames).toFixed(2);
+      frames = 0; lastT = ts;
+      // write if visible
+      if (panel.style.display === "block"){
+        try {
+          $("a_fps").textContent = fps;
+          $("a_ms").textContent  = ms;
+          $("a_bullets").textContent = (state?.bullets?.length ?? 0);
+          $("a_enemies").textContent = (state?.enemies?.length ?? 0);
+          $("a_hp").textContent = (state?.player?.hp ?? "—");
+          $("a_noise").textContent = (state ? Math.round(state.noise*100)+"%" : "—");
+          $("a_world").textContent = (state ? `${state.world.w}×${state.world.h}` : "—");
+          $("a_net").textContent = (state ? `${state.net.role}${state.net.connected?" (connected)":" (offline)"}` : "—");
+        } catch(e){}
+      }
+    }
+    requestAnimationFrame(perfTick);
+  }
+  requestAnimationFrame(perfTick);
+
+  // ——— God mode / admin actions ———
+  let god = false;
+  $("a_god")?.addEventListener("click", ()=>{
+    god = !god;
+    if (state?.player) state.player.hp = 9999;
+    $("a_god").textContent = `God Mode: ${god?"On":"Off"}`;
+  });
+  // Hook into damage (lightweight): if god, clamp hp up
+  const _gameOver = (typeof gameOver === "function") ? gameOver : null;
+  if (_gameOver){
+    // No need to wrap; we just auto-heal each perf write if god
+    setInterval(()=>{ if (god && state?.player) state.player.hp = 9999; }, 200);
+  }
+
+  $("a_kill")?.addEventListener("click", ()=>{
+    if (!state) return;
+    state.enemies.length = 0;
+    try { document.getElementById('enemyText').textContent = "0"; } catch(e){}
+  });
+
+  $("a_spawn")?.addEventListener("click", ()=>{
+    if (!state?.player) return;
+    const ex = state.player.x + 200*Math.random() - 100;
+    const ey = state.player.y + 200*Math.random() - 100;
+    state.enemies.push({ x:ex, y:ey, r:12, hp:60, speed:120, state:'patrol', target:null, fireCd:0, angle:0, fov:Math.PI*0.8, viewDist:300, hear:200 });
+  });
+
+  // ——— AI protocol live tuning ———
+  // Defaults = 100%
+  const ai = {
+    viewMul: 1.0,
+    hearMul: 1.0,
+    fireMul: 1.0,
+    accMul: 1.0  // will affect enemy bullet spread (lower => tighter)
+  };
+  const rs = {
+    view: $("ai_view"),
+    hear: $("ai_hear"),
+    fire: $("ai_fire"),
+    acc:  $("ai_acc"),
+    lab_vd: $("lab_vd"),
+    lab_hear: $("lab_hear"),
+    lab_fire: $("lab_fire"),
+    lab_acc: $("lab_acc"),
+  };
+  function applyLabels(){
+    rs.lab_vd.textContent = rs.view.value + "%";
+    rs.lab_hear.textContent = rs.hear.value + "%";
+    rs.lab_fire.textContent = rs.fire.value + "%";
+    rs.lab_acc.textContent = rs.acc.value + "%";
+  }
+  function syncModel(){
+    ai.viewMul = (+rs.view.value)/100;
+    ai.hearMul = (+rs.hear.value)/100;
+    ai.fireMul = (+rs.fire.value)/100;
+    ai.accMul  = (+rs.acc.value)/100;
+  }
+  ["input","change"].forEach(evt=>{
+    rs.view?.addEventListener(evt, ()=>{ applyLabels(); syncModel(); });
+    rs.hear?.addEventListener(evt, ()=>{ applyLabels(); syncModel(); });
+    rs.fire?.addEventListener(evt, ()=>{ applyLabels(); syncModel(); });
+    rs.acc ?.addEventListener(evt, ()=>{ applyLabels(); syncModel(); });
+  });
+  applyLabels(); syncModel();
+
+  // Patch enemy AI behavior by monkey-patching shootFrom for enemy fire spread,
+  // and touching enemy properties (viewDist, hear, fireCd pacing) live.
+  let _shootFrom = (typeof shootFrom === "function") ? shootFrom : null;
+  if (_shootFrom && !window.__shootPatched){
+    window.__shootPatched = true;
+    window.shootFrom = function(from, angle, friendly=true, weapon=null){
+      // If NOT friendly (i.e., enemy), scale spread inverse to accMul (lower % -> worse accuracy)
+      if (!friendly){
+        const w = weapon || {speed:800, spread:0.06, dmg:15};
+        const scaled = Object.assign({}, w);
+        // accuracy %: 100% = base spread, 200% = half the spread (more accurate), 50% = double spread (less accurate)
+        const factor = 100 / (ai.accMul*100); // 1/accMul
+        scaled.spread = (w.spread ?? 0.06) * factor;
+        return _shootFrom(from, angle, friendly, scaled);
+      }
+      return _shootFrom(from, angle, friendly, weapon);
+    };
+  }
+
+  function applyAIToExisting(){
+    if (!state?.enemies) return;
+    for (const e of state.enemies){
+      e.viewDist = 300 * ai.viewMul;
+      e.hear     = 200 * ai.hearMul;
+      // fire rate: shrink cooldown by fireMul (higher => faster shots)
+      e._fireMul = ai.fireMul; // stored for reference
+    }
+    // Also wrap updateEnemy to respect fireMul
+    if (typeof updateEnemy === "function" && !window.__enemyPatched){
+      window.__enemyPatched = true;
+      const _upd = updateEnemy;
+      window.updateEnemy = function(e){
+        const pre = e.fireCd;
+        _upd(e);
+        // After AI step, adjust new cooldown when it resets:
+        if (e.fireCd > pre && e._fireMul){ e.fireCd = e.fireCd / e._fireMul; }
+      };
+    }
+  }
+
+  $("ai_apply")?.addEventListener("click", ()=>{
+    syncModel(); applyAIToExisting();
+    alert("AI settings applied to current enemies.");
+  });
+
+  $("ai_reset")?.addEventListener("click", ()=>{
+    rs.view.value = rs.hear.value = rs.fire.value = rs.acc.value = 100;
+    applyLabels(); syncModel(); applyAIToExisting();
+  });
+
+  // Keyboard quick-open: press backtick/tilde
+  window.addEventListener("keydown", (e)=>{
+    if (e.key === "`" || e.code === "Backquote"){
+      if (!promptAdmin()) return;
+      panel.style.display = (panel.style.display === "block") ? "none" : "block";
+    }
+  });
+})();
   </script>
 </body>
 </html>

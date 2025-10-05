@@ -33,7 +33,7 @@
     button:hover { box-shadow: 0 0 0 1px #5a75bf, 0 10px 30px #0006; }
     button:active { transform: translateY(1px) scale(.99); }
 
-    .toast { position: absolute; right: 16px; bottom: 16px; background: #0f1935e6; border: 1px solid #304071; padding: 10px 12px; border-radius: 12px; font-size: 12px; color: var(--muted); }
+    .toast { position: absolute; right: 16px; bottom: 16px; background: #0f1935e6; border: 1px solid #304071; padding: 10px 12px; border-radius: 12px; font-size: 12px; color: var(--muted); pointer-events: none; }
     a { color: var(--accent); text-decoration: none }
 
     #gameWrap { position: fixed; inset: 0; display: grid; place-items: center; }
@@ -45,6 +45,11 @@
     .legend code { color: var(--text); background: #0b1230; border-radius: 6px; padding: 2px 6px; border: 1px solid #1f2a55; }
 
     .extract { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: #0f1935e6; border: 1px solid #304071; border-radius: 12px; padding: 8px 12px; font-size: 12px; color: var(--muted); display: none; }
+
+    /* make menu and modal clickable despite .hud being pointer-events:none */
+    #menu { pointer-events: auto; }
+    #menu * { pointer-events: auto; }
+    #mpModal { pointer-events: auto; }
   </style>
 </head>
 <body>
@@ -86,6 +91,50 @@
     <div id="toast" class="toast" style="display:none"></div>
   </div>
 
+  <!-- ===== Multiplayer Modal (Manual WebRTC) ===== -->
+  <div id="mpModal" style="display:none; position:fixed; inset:0; background:#0008; backdrop-filter: blur(2px);">
+    <div style="position:absolute; left:50%; top:50%; transform: translate(-50%,-50%); width:min(900px,92vw); background:#0f1935f0; border:1px solid #2a3f77; border-radius:16px; padding:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px">
+        <h2 style="margin:0; font-size:16px; letter-spacing:.08em; text-transform:uppercase">Multiplayer (P2P) — Manual Signaling</h2>
+        <button id="mpClose" class="btn">Close</button>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
+          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Host</h3>
+          <ol style="margin:0 0 8px 18px; color:#9fb2db">
+            <li>Click <strong>Create Offer</strong> then <strong>Copy Offer</strong>.</li>
+            <li>Send it to your friend (DM/Discord).</li>
+            <li>Paste their <em>Answer</em> below and press <strong>Connect</strong>.</li>
+          </ol>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px">
+            <button id="hostCreate" class="btn">Create Offer</button>
+            <button id="hostCopy" class="btn">Copy Offer</button>
+          </div>
+          <textarea id="hostOffer" placeholder="Host Offer (auto-filled)" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+          <div style="height:8px"></div>
+          <textarea id="hostAnswer" placeholder="Paste Client Answer here" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+          <div style="height:8px"></div>
+          <button id="hostConnect" class="btn play"><span class="dot"></span> Connect</button>
+        </div>
+        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
+          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Join</h3>
+          <ol style="margin:0 0 8px 18px; color:#9fb2db">
+            <li>Paste the host's <em>Offer</em> below and click <strong>Create Answer</strong>.</li>
+            <li>Copy your <em>Answer</em> and send it back to the host.</li>
+          </ol>
+          <textarea id="joinOffer" placeholder="Paste Host Offer here" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0">
+            <button id="joinCreate" class="btn">Create Answer</button>
+            <button id="joinCopy" class="btn">Copy Answer</button>
+          </div>
+          <textarea id="joinAnswer" placeholder="Client Answer (auto-filled)" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+        </div>
+      </div>
+      <p style="margin:10px 0 0; color:#9fb2db; font-size:12px">Tip: This uses public STUN only. Some networks may block P2P connections without TURN.</p>
+    </div>
+  </div>
+
+  <!-- ====== SCRIPT AFTER ALL DOM (so bindings never see nulls) ====== -->
   <script>
   ;(() => {
     // ================== SAFETY: GLOBAL ERROR TOAST ==================
@@ -130,10 +179,42 @@
     function rectInAny(walls, r){ for (const w of walls){ if (rectsOverlap(w,r)) return true; } return false; }
     function pointInAny(walls, x,y){ for (const w of walls){ if (pointInRect(x,y,w)) return true; } return false; }
 
+    // ================== GAME STATE ==================
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const mini = document.getElementById('mini');
+    const mctx = mini.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    const state = {
+      running:false, t:0, dt:0, last:0,
+      keys: new Set(), mouse:{x:0,y:0,down:false},
+      gp:null,
+      world:{ w: 2200, h: 1400 },
+      camera:{ x:0, y:0, zoom:1 },
+      player:null, ally:null, bullets:[], enemies:[], walls:[], intel:null, extractZone:null,
+      noise:0, won:false, lost:false,
+      weapons:[
+        { key:'AR', name:'AR-9', rpm:600, dmg:28, mag:30, reserve:90, reload:1.9, spread:0.035, speed:900 },
+        { key:'SMG', name:'Viper SMG', rpm:900, dmg:20, mag:40, reserve:160, reload:1.6, spread:0.055, speed:950 },
+        { key:'DMR', name:'DMR-7', rpm:300, dmg:45, mag:15, reserve:45, reload:2.2, spread:0.012, speed:1100 }
+      ],
+      weaponIndex:0,
+      net: {
+        role: 'solo',        // 'solo' | 'host' | 'client'
+        pc: null,
+        dc: null,
+        connected: false,
+        lastSnapT: 0,
+        clientInp: {ax:0, ay:0, aim:0, shoot:false, interact:false},
+        snapTimer: 0
+      }
+    };
+
+    // ================== MAP GEN ==================
     function generateLevelLayout(){
       const walls = [];
-      const safeStart = rect(0, H/2 - 140, 280, 280); // keep spawn/extract area clear
-      // Place 12–18 random walls
+      const safeStart = rect(0, H/2 - 140, 280, 280);
       const seed = (Date.now() % 2147483647);
       const rng = makeRNG(seed);
       const count = randi(rng, 12, 18);
@@ -148,7 +229,6 @@
         const candidate = rect(x - (w>>1), y - (h>>1), w, h);
         if (candidate.x < 0 || candidate.y < 0 || candidate.x + candidate.w > state.world.w || candidate.y + candidate.h > state.world.h) { i--; continue; }
         if (rectsOverlap(candidate, safeStart)) { i--; continue; }
-        // avoid heavy overlap with existing walls
         let bad = false;
         for (const w2 of walls){
           const areaOverlap = Math.max(0, Math.min(candidate.x+candidate.w, w2.x+w2.w) - Math.max(candidate.x, w2.x)) * Math.max(0, Math.min(candidate.y+candidate.h, w2.y+w2.h) - Math.max(candidate.y, w2.y));
@@ -158,69 +238,32 @@
         walls.push(candidate);
       }
 
-      // Choose intel position far from start and not inside walls
-      let intel = {x: state.world.w - 250, y: randi(rng, 160, state.world.h-160), r:12, taken:false};
+      // Intel
+      const rng2 = makeRNG(seed ^ 0x9e3779b9);
+      let intel = {x: state.world.w - 250, y: randi(rng2, 160, state.world.h-160), r:12, taken:false};
       for (let t=0; t<80; t++){
-        const ix = randi(rng, Math.floor(state.world.w*0.55), state.world.w-100);
-        const iy = randi(rng, 120, state.world.h-120);
+        const ix = randi(rng2, Math.floor(state.world.w*0.55), state.world.w-100);
+        const iy = randi(rng2, 120, state.world.h-120);
         if (!pointInAny(walls, ix, iy)) { intel.x=ix; intel.y=iy; break; }
       }
-
       return { walls, intel };
     }
 
     function toast(msg, ms=2000){ const el = document.getElementById('toast'); if(!el) return; el.textContent=msg; el.style.display='block'; clearTimeout(el._t); el._t=setTimeout(()=>el.style.display='none', ms); }
-
-    // ================== GAME STATE ==================
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
-    const mini = document.getElementById('mini');
-    const mctx = mini.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-
-    const state = {
-      running:false, t:0, dt:0, last:0,
-      keys: new Set(), mouse:{x:0,y:0,down:false},
-      gp:null,
-      world:{ w: 2200, h: 1400 },
-      camera:{ x:0, y:0, zoom:1 },
-      player:null, bullets:[], enemies:[], walls:[], intel:null, extractZone:null,
-      noise:0, won:false, lost:false,
-      weapons:[
-        { key:'AR', name:'AR-9', rpm:600, dmg:28, mag:30, reserve:90, reload:1.9, spread:0.035, speed:900 },
-        { key:'SMG', name:'Viper SMG', rpm:900, dmg:20, mag:40, reserve:160, reload:1.6, spread:0.055, speed:950 },
-        { key:'DMR', name:'DMR-7', rpm:300, dmg:45, mag:15, reserve:45, reload:2.2, spread:0.012, speed:1100 }
-      ],
-      weaponIndex:0,
-      // ===== NET STATE =====
-      net: {
-        role: 'solo',        // 'solo' | 'host' | 'client'
-        pc: null,
-        dc: null,
-        connected: false,
-        lastSnapT: 0,
-        clientInp: {ax:0, ay:0, aim:0, shoot:false, interact:false},
-        snapTimer: 0
-      }
-    };
 
     function setupLevel(){
       state.bullets.length=0; state.enemies.length=0; state.walls.length=0; state.won=false; state.lost=false; state.noise=0;
       state.player = { x: 200, y: H/2, r: 14, hp: 100, speed: 180, dir: 0, fireCd:0, hasIntel:false, reloading:false, reloadT:0, ammo:[] };
       state.player.ammo = state.weapons.map(w=>({mag:w.mag, reserve:w.reserve}));
       state.weaponIndex = 0; updateWeaponHud();
-      // Ally placeholder (created when client connects)
       state.ally = null;
 
-      // --- Procedural layout ---
       const {walls, intel} = generateLevelLayout();
       state.walls.push(...walls);
       state.intel = intel;
 
-      // Extraction zone near start (always clear by generator)
       state.extractZone = { x: 120, y: H/2 - 60, w: 160, h: 120, active:false };
 
-      // Spawn enemies in free spaces (prefer near intel)
       const makeEnemy = (x,y)=>({ x,y, r:12, hp:60, speed:120, state:'patrol', target:null, fireCd:0, angle:0, fov:Math.PI*0.8, viewDist:300, hear: 200 });
       const enemyCount = 10 + Math.floor(Math.random()*6);
       let tries = 0;
@@ -243,11 +286,12 @@
     const downKeys = new Set();
     window.addEventListener('keydown', e=>{
       downKeys.add(e.code);
-      if (["KeyW","KeyA","KeyS","KeyD","Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Digit1","Digit2","Digit3","KeyR"].includes(e.code)) e.preventDefault();
+      if (["KeyW","KeyA","KeyS","KeyD","Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Digit1","Digit2","Digit3","KeyR","KeyE"].includes(e.code)) e.preventDefault();
       if (e.code==='Digit1') setWeapon(0);
       if (e.code==='Digit2') setWeapon(1);
       if (e.code==='Digit3') setWeapon(2);
       if (e.code==='KeyR') startReload();
+      if (e.code==='KeyE') tryInteract();
     });
     window.addEventListener('keyup', e=> downKeys.delete(e.code));
     state.keys = downKeys;
@@ -261,7 +305,7 @@
     window.addEventListener('gamepaddisconnected', ()=>{ state.gp=null; toast('Controller disconnected'); });
     function readGamepad(){ if (state.gp==null) return null; return navigator.getGamepads()[state.gp]; }
 
-    // ================== MULTIPLAYER (WEBRTC) HELPERS ==================
+    // ================== NET (WebRTC) ==================
     async function createPeer(role){
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: ['stun:stun.l.google.com:19302','stun:global.stun.twilio.com:3478'] }]
@@ -285,7 +329,6 @@
       dc.onopen = ()=>{
         toast('DataChannel open');
         if (state.net.role === 'host'){
-          // spawn ally for client
           state.ally = { x: state.player.x+24, y: state.player.y, r:14, hp:100, speed:180, dir:0, fireCd:0,
             hasIntel:false, reloading:false, reloadT:0,
             ammo: state.weapons.map(w=>({mag:w.mag, reserve:w.reserve})) };
@@ -293,10 +336,7 @@
       };
       dc.onmessage = (ev)=> handleNetMessage(ev.data);
     }
-    function sendJSON(obj){
-      const dc = state.net.dc; if (!dc || dc.readyState!=='open') return;
-      dc.send(JSON.stringify(obj));
-    }
+    function sendJSON(obj){ const dc = state.net.dc; if (!dc || dc.readyState!=='open') return; dc.send(JSON.stringify(obj)); }
     function handleNetMessage(data){
       let msg; try { msg = JSON.parse(data); } catch{ return; }
       if (msg.type === 'inp' && state.net.role === 'host' && state.ally){
@@ -310,63 +350,58 @@
       const players = [{x:state.player.x,y:state.player.y,dir:state.player.dir,hp:state.player.hp}];
       if (state.ally) players.push({x:state.ally.x,y:state.ally.y,dir:state.ally.dir,hp:state.ally.hp});
       return {
-        type:'snap',
-        t: performance.now(),
+        type:'snap', t: performance.now(),
         world:{w:state.world.w,h:state.world.h},
         players,
         bullets: state.bullets.slice(0,64).map(b=>({x:b.x,y:b.y,vx:b.vx,vy:b.vy,life:b.life,f:b.friendly})),
         enemies: state.enemies.slice(0,32).map(e=>({x:e.x,y:e.y,a:e.angle,hp:e.hp})),
-        intel: {x:state.intel.x,y:state.intel.y,t:state.intel.taken},
-        extract: {x:state.extractZone.x,y:state.extractZone.y,w:state.extractZone.w,h:state.extractZone.h,a:state.extractZone.active},
+        intel:{x:state.intel.x,y:state.intel.y,t:state.intel.taken},
+        extract:{x:state.extractZone.x,y:state.extractZone.y,w:state.extractZone.w,h:state.extractZone.h,a:state.extractZone.active},
         noise: state.noise
       };
     }
     function applySnapshot(s){
-      state.world.w = s.world.w; state.world.h = s.world.h;
+      state.world.w=s.world.w; state.world.h=s.world.h;
       state.bullets = s.bullets.map(b=>({x:b.x,y:b.y,vx:b.vx,vy:b.vy,life:b.life,dmg:15,friendly:b.f}));
       state.enemies = s.enemies.map(e=>({x:e.x,y:e.y,angle:e.a,hp:e.hp,r:12,speed:120,state:'patrol',fireCd:0,fov:Math.PI*0.8,viewDist:300,hear:200}));
-      const p0 = s.players[0]; if (p0){ state.player.x=p0.x; state.player.y=p0.y; state.player.dir=p0.dir; state.player.hp=p0.hp; }
-      const p1 = s.players[1];
+      const p0=s.players[0]; if (p0){ state.player.x=p0.x; state.player.y=p0.y; state.player.dir=p0.dir; state.player.hp=p0.hp; }
+      const p1=s.players[1];
       if (p1){
         if (!state.ally){
-          state.ally = { x:p1.x, y:p1.y, r:14, hp:p1.hp, speed:180, dir:p1.dir, fireCd:0, hasIntel:false, reloading:false, reloadT:0,
-            ammo: state.weapons.map(w=>({mag:w.mag,reserve:w.reserve})) };
-        } else {
-          state.ally.x=p1.x; state.ally.y=p1.y; state.ally.dir=p1.dir; state.ally.hp=p1.hp;
-        }
+          state.ally={ x:p1.x,y:p1.y,r:14,hp:p1.hp,speed:180,dir:p1.dir,fireCd:0,hasIntel:false,reloading:false,reloadT:0, ammo: state.weapons.map(w=>({mag:w.mag,reserve:w.reserve}))};
+        } else { state.ally.x=p1.x; state.ally.y=p1.y; state.ally.dir=p1.dir; state.ally.hp=p1.hp; }
       }
-      state.intel.x = s.intel.x; state.intel.y = s.intel.y; state.intel.taken = s.intel.t;
-      state.extractZone.x = s.extract.x; state.extractZone.y = s.extract.y; state.extractZone.w = s.extract.w; state.extractZone.h = s.extract.h; state.extractZone.active = s.extract.a;
+      state.intel.x=s.intel.x; state.intel.y=s.intel.y; state.intel.taken=s.intel.t;
+      state.extractZone.x=s.extract.x; state.extractZone.y=s.extract.y; state.extractZone.w=s.extract.w; state.extractZone.h=s.extract.h; state.extractZone.active=s.extract.a;
       state.noise = s.noise;
     }
     async function hostCreateOffer(){
       await createPeer('host');
-      const pc = state.net.pc;
-      const offer = await pc.createOffer();
+      const pc=state.net.pc;
+      const offer=await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await new Promise(r => pc.onicecandidate = e => { if(!e.candidate) r(); });
-      const sdp = JSON.stringify(pc.localDescription);
-      document.getElementById('hostOffer').value = sdp;
+      await new Promise(r=> pc.onicecandidate = e=>{ if(!e.candidate) r(); });
+      document.getElementById('hostOffer').value = JSON.stringify(pc.localDescription);
       toast('Offer created — copy it to your friend');
     }
     async function hostConnectWithAnswer(){
-      const ansStr = document.getElementById('hostAnswer').value.trim();
-      if (!ansStr) return toast('Paste client answer first');
-      const pc = state.net.pc; if (!pc) return toast('Create offer first');
+      const ansStr=document.getElementById('hostAnswer').value.trim();
+      if(!ansStr) return toast('Paste client answer first');
+      const pc=state.net.pc; if(!pc) return toast('Create offer first');
       await pc.setRemoteDescription(JSON.parse(ansStr));
       toast('Connecting…');
     }
     async function clientCreateAnswer(){
-      const offerStr = document.getElementById('joinOffer').value.trim();
-      if (!offerStr) return toast('Paste the host offer first');
-      const pc = await createPeer('client');
+      const offerStr=document.getElementById('joinOffer').value.trim();
+      if(!offerStr) return toast('Paste the host offer first');
+      const pc=await createPeer('client');
       await pc.setRemoteDescription(JSON.parse(offerStr));
-      const answer = await pc.createAnswer();
+      const answer=await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      await new Promise(r => pc.onicecandidate = e => { if(!e.candidate) r(); });
-      const sdp = JSON.stringify(pc.localDescription);
+      await new Promise(r=> pc.onicecandidate = e=>{ if(!e.candidate) r(); });
+      const sdp=JSON.stringify(pc.localDescription);
       document.getElementById('joinAnswer').value = sdp;
-      try { await navigator.clipboard.writeText(sdp); toast('Answer copied to clipboard'); } catch {}
+      try{ await navigator.clipboard.writeText(sdp); toast('Answer copied to clipboard'); }catch{}
     }
 
     // ================== PHYSICS / COLLISION ==================
@@ -381,10 +416,10 @@
       tryMove(vx*state.dt, 0); tryMove(0, vy*state.dt);
     }
 
-    // ================== ENEMY AI (targets nearest of player/ally) ==================
+    // ================== ENEMY AI ==================
     function updateEnemy(e){
-      const p1 = state.player, p2 = state.ally;
-      const tgt = (!p2 || Math.hypot(p1.x-e.x, p1.y-e.y) <= Math.hypot(p2.x-e.x, p2.y-e.y)) ? p1 : p2;
+      const p1 = state.player, p2 = state.ally || state.player;
+      const tgt = (!state.ally || Math.hypot(p1.x-e.x, p1.y-e.y) <= Math.hypot(p2.x-e.x, p2.y-e.y)) ? p1 : p2;
       const toP = {x:tgt.x - e.x, y:tgt.y - e.y};
       const angToP = Math.atan2(toP.y, toP.x); const angDiff = Math.atan2(Math.sin(angToP - e.angle), Math.cos(angToP - e.angle));
       const see = (Math.abs(angDiff) < e.fov*0.5) && (Math.hypot(toP.x,toP.y) < e.viewDist) && lineOfSight(e, tgt, state.walls);
@@ -474,7 +509,7 @@
         if (gp.buttons[0]?.pressed) tryInteract();
       }
 
-      // CLIENT: stream inputs to host
+      // CLIENT: send inputs to host
       if (state.net.role === 'client' && state.net.connected){
         sendJSON({type:'inp', inp:{ ax, ay, aim: aimAngle, shoot: !!state.mouse.down, interact: !!state.keys.has('KeyE') }});
       }
@@ -507,7 +542,6 @@
       }
       p.fireCd = Math.max(0, p.fireCd - state.dt);
 
-      // Client role skips world sim; host/solo simulates
       const isClient = (state.net.role === 'client' && state.net.connected);
       if (!isClient){
         // Bullets
@@ -543,10 +577,12 @@
         const dzRight = dzLeft + DZ_W;
         const dzTop = state.camera.y + (H - DZ_H)/2;
         const dzBottom = dzTop + DZ_H;
-        if (p.x < dzLeft) state.camera.x = clamp(p.x - DZ_W/2, 0, state.world.w - W);
-        else if (p.x > dzRight) state.camera.x = clamp(p.x + DZ_W/2 - W, 0, state.world.w - W);
-        if (p.y < dzTop) state.camera.y = clamp(p.y - DZ_H/2, 0, state.world.h - H);
-        else if (p.y > dzBottom) state.camera.y = clamp(p.y + DZ_H/2 - H, 0, state.world.h - H);
+        const clampCam = ()=>{ state.camera.x = clamp(state.camera.x, 0, state.world.w - W); state.camera.y = clamp(state.camera.y, 0, state.world.h - H); };
+        if (p.x < dzLeft) state.camera.x = p.x - DZ_W/2;
+        else if (p.x > dzRight) state.camera.x = p.x + DZ_W/2 - W;
+        if (p.y < dzTop) state.camera.y = p.y - DZ_H/2;
+        else if (p.y > dzBottom) state.camera.y = p.y + DZ_H/2 - H;
+        clampCam();
       }
 
       // Render
@@ -562,10 +598,7 @@
       // HOST: periodic snapshot to client
       if (state.net.role === 'host' && state.net.connected){
         state.net.snapTimer += state.dt;
-        if (state.net.snapTimer > 0.1){
-          sendJSON(makeSnapshot());
-          state.net.snapTimer = 0;
-        }
+        if (state.net.snapTimer > 0.1){ sendJSON(makeSnapshot()); state.net.snapTimer = 0; }
       }
     }
 
@@ -628,57 +661,34 @@
 
     function gameOver(won){ state.running=false; state.won=won; document.getElementById('menu').style.display='grid'; const t=document.querySelector('#menu .subtitle'); t.innerHTML = won? 'Extraction complete. Mission success. <strong>Play again?</strong>':'You were neutralized. <strong>Retry?</strong>'; }
 
-   // ================== UI BINDINGS ==================
-function bindUI() {
-  const $ = id => document.getElementById(id);
+    // ================== UI BINDINGS ==================
+    function bindUI(){
+      const $ = id => document.getElementById(id);
 
-  // Top menu
-  $('#startBtn')?.addEventListener('click', ()=>{
-    setupLevel();
-    state.running = true;
-    state.last = performance.now();
-    $('#menu').style.display = 'none';
-    canvas.focus();
-    requestAnimationFrame(step);
-  });
+      $('#startBtn')?.addEventListener('click', ()=>{
+        setupLevel(); state.running=true; state.last=performance.now();
+        $('#menu').style.display='none'; canvas.focus(); requestAnimationFrame(step);
+      });
+      $('#howBtn')?.addEventListener('click', ()=>{ toast('Secure the Intel (blue), then reach the green extraction zone near spawn. Avoid patrols; shoot sparingly to keep noise low.'); });
+      $('#gpBtn')?.addEventListener('click', ()=>{ const gp = readGamepad(); if (gp){ toast('Controller active. Left stick move, right stick aim, RT shoot, A interact.'); } else { toast('Press any button on your controller.'); } });
 
-  $('#howBtn')?.addEventListener('click', ()=>{
-    toast('Secure the Intel (blue), then reach the green extraction zone near spawn. Avoid patrols; shoot sparingly to keep noise low.');
-  });
+      $('#mpBtn')?.addEventListener('click', ()=>{ $('#mpModal').style.display='block'; });
+      $('#mpClose')?.addEventListener('click', ()=>{ $('#mpModal').style.display='none'; });
 
-  $('#gpBtn')?.addEventListener('click', ()=>{
-    const gp = readGamepad();
-    if (gp) toast('Controller active. Left stick move, right stick aim, RT shoot, A interact.');
-    else toast('Press any button on your controller.');
-  });
+      $('#hostCreate')?.addEventListener('click', hostCreateOffer);
+      $('#hostCopy')?.addEventListener('click', async ()=>{
+        const v=$('#hostOffer').value; if(!v) return toast('No offer yet');
+        try{ await navigator.clipboard.writeText(v); toast('Offer copied'); }catch{ toast('Copy failed — select & copy'); }
+      });
+      $('#hostConnect')?.addEventListener('click', hostConnectWithAnswer);
 
-  // Multiplayer modal open/close
-  $('#mpBtn')?.addEventListener('click', ()=>{ $('#mpModal').style.display = 'block'; });
-  $('#mpClose')?.addEventListener('click', ()=>{ $('#mpModal').style.display = 'none'; });
-
-  // Host side
-  $('#hostCreate')?.addEventListener('click', hostCreateOffer);
-  $('#hostCopy')?.addEventListener('click', async ()=>{
-    const v = $('#hostOffer').value;
-    if (!v) return toast('No offer yet');
-    try { await navigator.clipboard.writeText(v); toast('Offer copied'); }
-    catch { toast('Copy failed — select & copy'); }
-  });
-  $('#hostConnect')?.addEventListener('click', hostConnectWithAnswer);
-
-  // Client side
-  $('#joinCreate')?.addEventListener('click', clientCreateAnswer);
-  $('#joinCopy')?.addEventListener('click', async ()=>{
-    const v = $('#joinAnswer').value;
-    if (!v) return toast('No answer yet');
-    try { await navigator.clipboard.writeText(v); toast('Answer copied'); }
-    catch { toast('Copy failed — select & copy'); }
-  });
-}
-
-// Ensure elements exist before we bind
-document.addEventListener('DOMContentLoaded', bindUI);
-
+      $('#joinCreate')?.addEventListener('click', clientCreateAnswer);
+      $('#joinCopy')?.addEventListener('click', async ()=>{
+        const v=$('#joinAnswer').value; if(!v) return toast('No answer yet');
+        try{ await navigator.clipboard.writeText(v); toast('Answer copied'); }catch{ toast('Copy failed — select & copy'); }
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindUI); else bindUI();
 
     // ================== DEV TESTS ==================
     function runTests(){
@@ -701,11 +711,15 @@ document.addEventListener('DOMContentLoaded', bindUI);
         if (Math.abs(Math.atan2(dy,dx) - ang) > 1e-9) throw new Error('angle mismatch');
       });
 
-      // Test 3: move clamps world bounds
-      t('moveWithColliders clamps to world', ()=>{
-        const obj = {x:2190,y:1390,r:14}; const beforeX = obj.x;
-        state.dt = 0.016; moveWithColliders(obj, 1000, 1000);
-        if (obj.x > state.world.w-obj.r || obj.y > state.world.h-obj.r) throw new Error('did not clamp');
+      // Test 3: move clamps world bounds (start in-bounds, then push past)
+      t('moveWithColliders clamps to world (no unintended left move when starting in-bounds)', ()=>{
+        const obj = { x: state.world.w - 20, y: state.world.h - 20, r: 14 };
+        const beforeX = obj.x;
+        state.dt = 0.016;
+        moveWithColliders(obj, 1000, 1000);
+        if (obj.x !== state.world.w - obj.r || obj.y !== state.world.h - obj.r) {
+          throw new Error('did not clamp to max bounds');
+        }
         if (obj.x < beforeX) throw new Error('unexpected left move');
       });
 
@@ -722,52 +736,10 @@ document.addEventListener('DOMContentLoaded', bindUI);
       else { console.log('All tests passed'); }
     }
 
-    // Init first frame for minimap visibility, run tests
-    setupLevel(); runTests(); draw(false);
+    // Boot once so minimap renders; tests run once
+    setupLevel(); runTests(); (function firstDraw(){ const p=state.player; if(!p) return; const mouseWorld={x:state.mouse.x+state.camera.x,y:state.mouse.y+state.camera.y}; draw(lineOfSight(p, mouseWorld, state.walls)); })();
+
   })();
   </script>
-
-  <!-- ===== Multiplayer Modal (Manual WebRTC) ===== -->
-  <div id="mpModal" style="display:none; position:fixed; inset:0; background:#0008; backdrop-filter: blur(2px);">
-    <div style="position:absolute; left:50%; top:50%; transform: translate(-50%,-50%); width:min(900px,92vw); background:#0f1935f0; border:1px solid #2a3f77; border-radius:16px; padding:16px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px">
-        <h2 style="margin:0; font-size:16px; letter-spacing:.08em; text-transform:uppercase">Multiplayer (P2P) — Manual Signaling</h2>
-        <button id="mpClose" class="btn">Close</button>
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
-        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
-          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Host</h3>
-          <ol style="margin:0 0 8px 18px; color:#9fb2db">
-            <li>Click <strong>Create Offer</strong> then <strong>Copy Offer</strong>.</li>
-            <li>Send it to your friend (DM/Discord).</li>
-            <li>Paste their <em>Answer</em> below and press <strong>Connect</strong>.</li>
-          </ol>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px">
-            <button id="hostCreate" class="btn">Create Offer</button>
-            <button id="hostCopy" class="btn">Copy Offer</button>
-          </div>
-          <textarea id="hostOffer" placeholder="Host Offer (auto-filled)" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
-          <div style="height:8px"></div>
-          <textarea id="hostAnswer" placeholder="Paste Client Answer here" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
-          <div style="height:8px"></div>
-          <button id="hostConnect" class="btn play"><span class="dot"></span> Connect</button>
-        </div>
-        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
-          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Join</h3>
-          <ol style="margin:0 0 8px 18px; color:#9fb2db">
-            <li>Paste the host's <em>Offer</em> below and click <strong>Create Answer</strong>.</li>
-            <li>Copy your <em>Answer</em> and send it back to the host.</li>
-          </ol>
-          <textarea id="joinOffer" placeholder="Paste Host Offer here" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0">
-            <button id="joinCreate" class="btn">Create Answer</button>
-            <button id="joinCopy" class="btn">Copy Answer</button>
-          </div>
-          <textarea id="joinAnswer" placeholder="Client Answer (auto-filled)" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
-        </div>
-      </div>
-      <p style="margin:10px 0 0; color:#9fb2db; font-size:12px">Tip: This uses public STUN only. Some networks may block P2P connections without TURN.</p>
-    </div>
-  </div>
 </body>
 </html>

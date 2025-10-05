@@ -24,7 +24,9 @@
     .hp { background: linear-gradient(90deg, #38ef7d, #3a86ff); }
     .noise { background: linear-gradient(90deg, #ffb703, #fb8500); }
 
-    .center { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(1000px 700px at 50% -10%, #16224a, transparent); }
+    /* Menu overlay must sit above HUD/canvas and be clickable */
+    .center { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: radial-gradient(1000px 700px at 50% -10%, #16224a, transparent); pointer-events: auto; }
+    #mpModal { z-index: 30; }
     .card { width: min(820px, 92vw); background: #0f1935e6; border: 1px solid #304071; border-radius: 18px; padding: 22px; box-shadow: 0 10px 40px #00000088; }
     .title { font-weight: 800; font-size: clamp(24px, 2.4vw + 16px, 42px); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px; }
     .subtitle { color: var(--muted); margin: 0 0 18px; }
@@ -73,20 +75,22 @@
     <div class="legend">Controls: <code>WASD</code> move · <code>Mouse</code> aim · <code>LMB</code> shoot · <code>E</code> interact · Controller supported (sticks + RT + A)</div>
     <div id="extractMsg" class="extract">Extraction available! Reach the green zone.</div>
 
-    <div id="menu" class="center">
-      <div class="card">
-        <h1 class="title">Task Force: Eclipse</h1>
-        <h2 class="subtitle">By Mizzery</h2>
-        <p class="subtitle">Top-down tactical raid. Secure the <strong>Intel Drive</strong>, avoid patrols, and extract alive. Enemies adapt to your noise and tactics.</p>
-        <div class="btns">
-          <button id="startBtn">New Operation</button>
-          <button id="mpBtn">Multiplayer (P2P)</button>
-          <button id="howBtn">How to Play</button>
-          <button id="gpBtn">Detect Controller</button>
-        </div>
-        <p style="margin-top:12px; color:var(--muted); font-size:12px">Beta v0.1 © Mizzery 2025.</p>
-      </div>
+  <!-- Menu is outside HUD so it can receive clicks -->
+<div id="menu" class="center">
+  <div class="card">
+    <h1 class="title">Task Force: Eclipse</h1>
+    <h2 class="subtitle">By Mizzery</h2>
+    <p class="subtitle">Top-down tactical raid. Secure the <strong>Intel Drive</strong>, avoid patrols, and extract alive. Enemies adapt to your noise and tactics.</p>
+    <div class="btns">
+      <button id="startBtn">New Operation</button>
+      <button id="mpBtn">Multiplayer (P2P)</button>
+      <button id="howBtn">How to Play</button>
+      <button id="gpBtn">Detect Controller</button>
     </div>
+    <p style="margin-top:12px; color:var(--muted); font-size:12px">Beta v0.1 © Mizzery 2025.</p>
+  </div>
+</div>
+
 
     <div id="toast" class="toast" style="display:none"></div>
   </div>

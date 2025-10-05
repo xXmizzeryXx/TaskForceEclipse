@@ -26,7 +26,6 @@
 
     /* Menu overlay must sit above HUD/canvas and be clickable */
     .center { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: radial-gradient(1000px 700px at 50% -10%, #16224a, transparent); pointer-events: auto; }
-    #mpModal { z-index: 30; }
     .card { width: min(820px, 92vw); background: #0f1935e6; border: 1px solid #304071; border-radius: 18px; padding: 22px; box-shadow: 0 10px 40px #00000088; }
     .title { font-weight: 800; font-size: clamp(24px, 2.4vw + 16px, 42px); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px; }
     .subtitle { color: var(--muted); margin: 0 0 18px; }
@@ -48,17 +47,16 @@
 
     .extract { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: #0f1935e6; border: 1px solid #304071; border-radius: 12px; padding: 8px 12px; font-size: 12px; color: var(--muted); display: none; }
 
-    /* make menu and modal clickable despite .hud being pointer-events:none */
-    #menu { pointer-events: auto; }
-    #menu * { pointer-events: auto; }
-    #mpModal { pointer-events: auto; }
+    /* z-index layering */
+    #menu { z-index: 50; }
+    #mpModal { z-index: 60; }
+    #optModal { z-index: 58; }
 
     /* Click layering – keep canvas under overlays */
-#gameWrap { position: fixed; inset: 0; z-index: 0; }
-.hud { z-index: 5; pointer-events: none; }        /* HUD text stays non-clickable */
-#menu { position: fixed; inset: 0; z-index: 50;    /* Menu overlay is above and clickable */
-  display: grid; place-items: center; pointer-events: auto; }
-#mpModal { z-index: 60; }                          /* Modal above menu */
+    #gameWrap { position: fixed; inset: 0; z-index: 0; }
+    .hud { z-index: 5; pointer-events: none; }
+    #menu { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; pointer-events: auto; }
+    #mpModal { z-index: 60; }
   </style>
 </head>
 <body>
@@ -82,22 +80,22 @@
     <div class="legend">Controls: <code>WASD</code> move · <code>Mouse</code> aim · <code>LMB</code> shoot · <code>E</code> interact · Controller supported (sticks + RT + A)</div>
     <div id="extractMsg" class="extract">Extraction available! Reach the green zone.</div>
 
-  <!-- Menu is outside HUD so it can receive clicks -->
-<div id="menu" class="center">
-  <div class="card">
-    <h1 class="title">Task Force: Eclipse</h1>
-    <h2 class="subtitle">By Mizzery</h2>
-    <p class="subtitle">Top-down tactical raid. Secure the <strong>Intel Drive</strong>, avoid patrols, and extract alive. Enemies adapt to your noise and tactics.</p>
-    <div class="btns">
-      <button id="startBtn" onclick="__startGame()">New Operation</button>
-      <button id="mpBtn"   onclick="__openMP()">Multiplayer (P2P)</button>
-      <button id="howBtn">How to Play</button>
-      <button id="gpBtn">Detect Controller</button>
+    <!-- Menu outside HUD -->
+    <div id="menu" class="center">
+      <div class="card">
+        <h1 class="title">Task Force: Eclipse</h1>
+        <h2 class="subtitle">By Mizzery</h2>
+        <p class="subtitle">Top-down tactical raid. Secure the <strong>Intel Drive</strong>, avoid patrols, and extract alive. Enemies adapt to your noise and tactics.</p>
+        <div class="btns">
+          <button id="startBtn" onclick="__startGame()">New Operation</button>
+          <button id="mpBtn"   onclick="__openMP()">Multiplayer (P2P)</button>
+          <button id="optBtn"  onclick="__openOpts()">Options</button>
+          <button id="howBtn">How to Play</button>
+          <button id="gpBtn">Detect Controller</button>
+        </div>
+        <p style="margin-top:12px; color:var(--muted); font-size:12px">Beta v0.1 © Mizzery 2025.</p>
+      </div>
     </div>
-    <p style="margin-top:12px; color:var(--muted); font-size:12px">Beta v0.1 © Mizzery 2025.</p>
-  </div>
-</div>
-
 
     <div id="toast" class="toast" style="display:none"></div>
   </div>
@@ -142,6 +140,63 @@
         </div>
       </div>
       <p style="margin:10px 0 0; color:#9fb2db; font-size:12px">Tip: This uses public STUN only. Some networks may block P2P connections without TURN.</p>
+    </div>
+  </div>
+
+  <!-- ===== Options Modal (CORRECT PLACE: outside <script>) ===== -->
+  <div id="optModal" style="display:none; position:fixed; inset:0; background:#0008; backdrop-filter: blur(2px); z-index:58;">
+    <div style="position:absolute; left:50%; top:50%; transform: translate(-50%,-50%); width:min(720px,92vw); background:#0f1935f0; border:1px solid #2a3f77; border-radius:16px; padding:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px">
+        <h2 style="margin:0; font-size:16px; letter-spacing:.08em; text-transform:uppercase">Options</h2>
+        <button id="optClose" class="btn" onclick="__optsClose()">Close</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px">
+        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
+          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Difficulty</h3>
+          <label style="display:block; margin:6px 0; color:#9fb2db">
+            Enemy Difficulty
+            <select id="optDifficulty" style="width:100%; margin-top:6px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px">
+              <option>Easy</option>
+              <option selected>Normal</option>
+              <option>Hard</option>
+            </select>
+          </label>
+        </div>
+
+        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
+          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Objectives</h3>
+          <label style="display:block; margin:6px 0; color:#9fb2db">
+            Intel Drives
+            <select id="optIntel" style="width:100%; margin-top:6px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px">
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+        </div>
+
+        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
+          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Map</h3>
+          <label style="display:block; margin:6px 0; color:#9fb2db">
+            Map Size
+            <select id="optMap" style="width:100%; margin-top:6px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px">
+              <option>Small</option>
+              <option selected>Standard</option>
+              <option>Large</option>
+            </select>
+          </label>
+        </div>
+
+        <div style="border:1px dashed #31509d; border-radius:12px; padding:12px; color:#a9bee8">
+          Changes apply to the <strong>next</strong> New Operation. Click <strong>Save</strong> then <strong>New Operation</strong>.
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
+        <button class="btn" onclick="__optsSave()">Save</button>
+        <button class="btn" onclick="__optsClose()">Close</button>
+      </div>
     </div>
   </div>
 
@@ -211,6 +266,7 @@
         { key:'DMR', name:'DMR-7', rpm:300, dmg:45, mag:15, reserve:45, reload:2.2, spread:0.012, speed:1100 }
       ],
       weaponIndex:0,
+      opts: { difficulty: 'Normal', intelCount: 1, mapSize: 'Standard' },  // <-- OPTIONS DEFAULTS
       net: {
         role: 'solo',        // 'solo' | 'host' | 'client'
         pc: null,
@@ -262,7 +318,13 @@
 
     function toast(msg, ms=2000){ const el = document.getElementById('toast'); if(!el) return; el.textContent=msg; el.style.display='block'; clearTimeout(el._t); el._t=setTimeout(()=>el.style.display='none', ms); }
 
+    // ======== APPLY OPTIONS + SETUP LEVEL ========
     function setupLevel(){
+      // Map size
+      if (state.opts.mapSize === 'Small')       state.world = { w: 1600, h: 1000 };
+      else if (state.opts.mapSize === 'Large')  state.world = { w: 2800, h: 1800 };
+      else                                      state.world = { w: 2200, h: 1400 };
+
       state.bullets.length=0; state.enemies.length=0; state.walls.length=0; state.won=false; state.lost=false; state.noise=0;
       state.player = { x: 200, y: H/2, r: 14, hp: 100, speed: 180, dir: 0, fireCd:0, hasIntel:false, reloading:false, reloadT:0, ammo:[] };
       state.player.ammo = state.weapons.map(w=>({mag:w.mag, reserve:w.reserve}));
@@ -275,8 +337,13 @@
 
       state.extractZone = { x: 120, y: H/2 - 60, w: 160, h: 120, active:false };
 
-      const makeEnemy = (x,y)=>({ x,y, r:12, hp:60, speed:120, state:'patrol', target:null, fireCd:0, angle:0, fov:Math.PI*0.8, viewDist:300, hear: 200 });
-      const enemyCount = 10 + Math.floor(Math.random()*6);
+      // Difficulty multiplier
+      const d = state.opts.difficulty;
+      const mul = d==='Easy' ? 0.8 : d==='Hard' ? 1.3 : 1.0;
+
+      const makeEnemy = (x,y)=>({ x,y, r:12, hp:Math.round(60*mul), speed:120, state:'patrol', target:null, fireCd:0, angle:0, fov:Math.PI*0.8, viewDist:300*mul, hear: 200 });
+      const baseCount = 10 + Math.floor(Math.random()*6);
+      const enemyCount = Math.round(baseCount * mul);
       let tries = 0;
       while (state.enemies.length < enemyCount && tries < 300){
         tries++;
@@ -673,91 +740,80 @@
     function gameOver(won){ state.running=false; state.won=won; document.getElementById('menu').style.display='grid'; const t=document.querySelector('#menu .subtitle'); t.innerHTML = won? 'Extraction complete. Mission success. <strong>Play again?</strong>':'You were neutralized. <strong>Retry?</strong>'; }
 
     // ================== UI BINDINGS (null-safe) ==================
-(function bindUI(){
-  const $ = id => document.getElementById(id);
-  const show = id => { const el = $(id); if (el) el.style.display = 'block'; };
-  const hide = id => { const el = $(id); if (el) el.style.display = 'none'; };
+    (function bindUI(){
+      const $ = id => document.getElementById(id);
+      const show = id => { const el = $(id); if (el) el.style.display = 'block'; };
+      const hide = id => { const el = $(id); if (el) el.style.display = 'none'; };
 
-  // Central actions
-  const actions = {
-    startBtn: () => {
-      setupLevel();
-      state.running = true;
-      state.last = performance.now();
-      hide('menu');              // null-safe
-      const cvs = $('game');     // focus only if canvas exists
-      if (cvs) cvs.focus();
-      requestAnimationFrame(step);
-    },
-    howBtn: () => {
-      toast('Secure the Intel (blue), then reach the green extraction zone near spawn. Avoid patrols; shoot sparingly to keep noise low.');
-    },
-    gpBtn: () => {
-      const gp = readGamepad();
-      toast(gp ? 'Controller active. Left stick move, right stick aim, RT shoot, A interact.' : 'Press any button on your controller.');
-    },
-    mpBtn: () => { show('mpModal'); },
-    mpClose: () => { hide('mpModal'); },
+      // Central actions
+      const actions = {
+        startBtn: () => {
+          setupLevel();
+          state.running = true;
+          state.last = performance.now();
+          hide('menu');
+          const cvs = $('game'); if (cvs) cvs.focus();
+          requestAnimationFrame(step);
+        },
+        howBtn: () => toast('Secure the Intel (blue), then reach the green extraction zone near spawn. Avoid patrols; shoot sparingly to keep noise low.'),
+        gpBtn: () => { const gp = readGamepad(); toast(gp ? 'Controller active. Left stick move, right stick aim, RT shoot, A interact.' : 'Press any button on your controller.'); },
+        mpBtn: () => { show('mpModal'); },
+        mpClose: () => { hide('mpModal'); },
 
-    hostCreate: hostCreateOffer,
-    hostCopy: async () => {
-      const v = $('hostOffer')?.value || '';
-      if (!v) return toast('No offer yet');
-      try { await navigator.clipboard.writeText(v); toast('Offer copied'); }
-      catch { toast('Copy failed — select & copy'); }
-    },
-    hostConnect: hostConnectWithAnswer,
+        hostCreate: hostCreateOffer,
+        hostCopy: async () => {
+          const v = $('hostOffer')?.value || '';
+          if (!v) return toast('No offer yet');
+          try { await navigator.clipboard.writeText(v); toast('Offer copied'); }
+          catch { toast('Copy failed — select & copy'); }
+        },
+        hostConnect: hostConnectWithAnswer,
 
-    joinCreate: clientCreateAnswer,
-    joinCopy: async () => {
-      const v = $('joinAnswer')?.value || '';
-      if (!v) return toast('No answer yet');
-      try { await navigator.clipboard.writeText(v); toast('Answer copied'); }
-      catch { toast('Copy failed — select & copy'); }
-    },
-  };
+        joinCreate: clientCreateAnswer,
+        joinCopy: async () => {
+          const v = $('joinAnswer')?.value || '';
+          if (!v) return toast('No answer yet');
+          try { await navigator.clipboard.writeText(v); toast('Answer copied'); }
+          catch { toast('Copy failed — select & copy'); }
+        },
+      };
 
-  // Attach directly if element exists
-  for (const id in actions) {
-    const el = $(id);
-    if (el) el.addEventListener('click', (e)=>{ e.preventDefault(); actions[id](); });
-  }
+      // Attach directly if element exists
+      for (const id in actions) {
+        const el = $(id);
+        if (el) el.addEventListener('click', (e)=>{ e.preventDefault(); actions[id](); });
+      }
 
-  // Fallback: delegated listener so clicks still work if DOM moves later
-  document.addEventListener('click', (e)=>{
-    const el = e.target.closest('#startBtn,#howBtn,#gpBtn,#mpBtn,#mpClose,#hostCreate,#hostCopy,#hostConnect,#joinCreate,#joinCopy');
-    if (!el) return;
-    const fn = actions[el.id];
-    if (fn) { e.preventDefault(); fn(); }
-  }, true);
+      // Delegated fallback
+      document.addEventListener('click', (e)=>{
+        const el = e.target.closest('#startBtn,#howBtn,#gpBtn,#mpBtn,#mpClose,#hostCreate,#hostCopy,#hostConnect,#joinCreate,#joinCopy');
+        if (!el) return;
+        const fn = actions[el.id];
+        if (fn) { e.preventDefault(); fn(); }
+      }, true);
 
-  // Optional: warn in console if expected containers are missing
-  ['menu','mpModal','game'].forEach(id=>{ if(!$(id)) console.warn(`Missing element #${id}`); });
+      // ---- Expose legacy helpers for inline onclick ----
+      window.__startGame = actions.startBtn;
+      window.__openMP   = actions.mpBtn;
+    })();
 
-  // ----- Hard-wired fallbacks for buttons -----
-window.__startGame = function(){
-  try {
-    setupLevel();
-    state.running = true;
-    state.last = performance.now();
-    const menu = document.getElementById('menu');
-    if (menu) menu.style.display = 'none';
-    const cvs = document.getElementById('game');
-    if (cvs) cvs.focus();
-    requestAnimationFrame(step);
-  } catch (e) {
-    console.error(e);
-    toast('Start failed: ' + e.message);
-  }
-};
-
-window.__openMP = function(){
-  const modal = document.getElementById('mpModal');
-  if (modal) modal.style.display = 'block';
-  else toast('Multiplayer modal not found');
-};
-})();
-
+    // ===== Options helpers (global) =====
+    window.__openOpts = function(){
+      const m=document.getElementById('optModal'); if(m) m.style.display='block';
+      const o=state.opts;
+      const d=document.getElementById('optDifficulty'); if(d) d.value=o.difficulty;
+      const i=document.getElementById('optIntel');      if(i) i.value=String(o.intelCount);
+      const s=document.getElementById('optMap');        if(s) s.value=o.mapSize;
+    };
+    window.__optsClose = function(){ const m=document.getElementById('optModal'); if(m) m.style.display='none'; };
+    window.__optsSave = function(){
+      const d=document.getElementById('optDifficulty')?.value || 'Normal';
+      const i=parseInt(document.getElementById('optIntel')?.value||'1',10);
+      const s=document.getElementById('optMap')?.value || 'Standard';
+      state.opts = { difficulty:d, intelCount: Math.max(1, Math.min(3, i||1)), mapSize:s };
+      toast('Options saved — start a New Operation to apply.');
+      window.__optsClose();
+    };
 
     // ================== DEV TESTS ==================
     function runTests(){

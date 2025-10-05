@@ -72,9 +72,10 @@
       <div class="card">
         <h1 class="title">Task Force: Eclipse</h1>
         <h2 class="subtitle">By Mizzery</h2>
-        <p class="subtitle">Top‑down tactical raid. Secure the <strong>Intel Drive</strong>, avoid patrols, and extract alive. Enemies adapt to your noise and tactics.</p>
+        <p class="subtitle">Top-down tactical raid. Secure the <strong>Intel Drive</strong>, avoid patrols, and extract alive. Enemies adapt to your noise and tactics.</p>
         <div class="btns">
           <button id="startBtn">New Operation</button>
+          <button id="mpBtn">Multiplayer (P2P)</button>
           <button id="howBtn">How to Play</button>
           <button id="gpBtn">Detect Controller</button>
         </div>
@@ -132,7 +133,7 @@
     function generateLevelLayout(){
       const walls = [];
       const safeStart = rect(0, H/2 - 140, 280, 280); // keep spawn/extract area clear
-      // Place 12–18 random walls (either long horizontal or vertical slabs)
+      // Place 12–18 random walls
       const seed = (Date.now() % 2147483647);
       const rng = makeRNG(seed);
       const count = randi(rng, 12, 18);
@@ -190,7 +191,17 @@
         { key:'SMG', name:'Viper SMG', rpm:900, dmg:20, mag:40, reserve:160, reload:1.6, spread:0.055, speed:950 },
         { key:'DMR', name:'DMR-7', rpm:300, dmg:45, mag:15, reserve:45, reload:2.2, spread:0.012, speed:1100 }
       ],
-      weaponIndex:0
+      weaponIndex:0,
+      // ===== NET STATE =====
+      net: {
+        role: 'solo',        // 'solo' | 'host' | 'client'
+        pc: null,
+        dc: null,
+        connected: false,
+        lastSnapT: 0,
+        clientInp: {ax:0, ay:0, aim:0, shoot:false, interact:false},
+        snapTimer: 0
+      }
     };
 
     function setupLevel(){
@@ -198,6 +209,8 @@
       state.player = { x: 200, y: H/2, r: 14, hp: 100, speed: 180, dir: 0, fireCd:0, hasIntel:false, reloading:false, reloadT:0, ammo:[] };
       state.player.ammo = state.weapons.map(w=>({mag:w.mag, reserve:w.reserve}));
       state.weaponIndex = 0; updateWeaponHud();
+      // Ally placeholder (created when client connects)
+      state.ally = null;
 
       // --- Procedural layout ---
       const {walls, intel} = generateLevelLayout();
@@ -217,7 +230,6 @@
         const ey = intel.y + Math.floor((Math.random()-0.5)*600);
         if (ex<40||ey<40||ex>state.world.w-40||ey>state.world.h-40) continue;
         if (pointInAny(state.walls, ex, ey)) continue;
-        // keep some distance from player spawn
         if (Math.hypot(ex-200, ey-H/2) < 260) continue;
         state.enemies.push(makeEnemy(ex, ey));
       }
@@ -249,6 +261,114 @@
     window.addEventListener('gamepaddisconnected', ()=>{ state.gp=null; toast('Controller disconnected'); });
     function readGamepad(){ if (state.gp==null) return null; return navigator.getGamepads()[state.gp]; }
 
+    // ================== MULTIPLAYER (WEBRTC) HELPERS ==================
+    async function createPeer(role){
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302','stun:global.stun.twilio.com:3478'] }]
+      });
+      state.net.pc = pc; state.net.role = role;
+      pc.oniceconnectionstatechange = ()=>{
+        if (pc.iceConnectionState === 'connected'){ state.net.connected = true; toast('P2P connected'); }
+        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed'){ state.net.connected = false; toast('P2P disconnected'); }
+      };
+      if (role === 'host'){
+        const dc = pc.createDataChannel('game', { ordered:false, maxRetransmits:0 });
+        wireDataChannel(dc);
+      } else {
+        pc.ondatachannel = (e)=> wireDataChannel(e.channel);
+      }
+      return pc;
+    }
+    function wireDataChannel(dc){
+      state.net.dc = dc;
+      dc.binaryType = 'arraybuffer';
+      dc.onopen = ()=>{
+        toast('DataChannel open');
+        if (state.net.role === 'host'){
+          // spawn ally for client
+          state.ally = { x: state.player.x+24, y: state.player.y, r:14, hp:100, speed:180, dir:0, fireCd:0,
+            hasIntel:false, reloading:false, reloadT:0,
+            ammo: state.weapons.map(w=>({mag:w.mag, reserve:w.reserve})) };
+        }
+      };
+      dc.onmessage = (ev)=> handleNetMessage(ev.data);
+    }
+    function sendJSON(obj){
+      const dc = state.net.dc; if (!dc || dc.readyState!=='open') return;
+      dc.send(JSON.stringify(obj));
+    }
+    function handleNetMessage(data){
+      let msg; try { msg = JSON.parse(data); } catch{ return; }
+      if (msg.type === 'inp' && state.net.role === 'host' && state.ally){
+        state.net.clientInp = msg.inp;
+      }
+      if (msg.type === 'snap' && state.net.role === 'client'){
+        applySnapshot(msg);
+      }
+    }
+    function makeSnapshot(){
+      const players = [{x:state.player.x,y:state.player.y,dir:state.player.dir,hp:state.player.hp}];
+      if (state.ally) players.push({x:state.ally.x,y:state.ally.y,dir:state.ally.dir,hp:state.ally.hp});
+      return {
+        type:'snap',
+        t: performance.now(),
+        world:{w:state.world.w,h:state.world.h},
+        players,
+        bullets: state.bullets.slice(0,64).map(b=>({x:b.x,y:b.y,vx:b.vx,vy:b.vy,life:b.life,f:b.friendly})),
+        enemies: state.enemies.slice(0,32).map(e=>({x:e.x,y:e.y,a:e.angle,hp:e.hp})),
+        intel: {x:state.intel.x,y:state.intel.y,t:state.intel.taken},
+        extract: {x:state.extractZone.x,y:state.extractZone.y,w:state.extractZone.w,h:state.extractZone.h,a:state.extractZone.active},
+        noise: state.noise
+      };
+    }
+    function applySnapshot(s){
+      state.world.w = s.world.w; state.world.h = s.world.h;
+      state.bullets = s.bullets.map(b=>({x:b.x,y:b.y,vx:b.vx,vy:b.vy,life:b.life,dmg:15,friendly:b.f}));
+      state.enemies = s.enemies.map(e=>({x:e.x,y:e.y,angle:e.a,hp:e.hp,r:12,speed:120,state:'patrol',fireCd:0,fov:Math.PI*0.8,viewDist:300,hear:200}));
+      const p0 = s.players[0]; if (p0){ state.player.x=p0.x; state.player.y=p0.y; state.player.dir=p0.dir; state.player.hp=p0.hp; }
+      const p1 = s.players[1];
+      if (p1){
+        if (!state.ally){
+          state.ally = { x:p1.x, y:p1.y, r:14, hp:p1.hp, speed:180, dir:p1.dir, fireCd:0, hasIntel:false, reloading:false, reloadT:0,
+            ammo: state.weapons.map(w=>({mag:w.mag,reserve:w.reserve})) };
+        } else {
+          state.ally.x=p1.x; state.ally.y=p1.y; state.ally.dir=p1.dir; state.ally.hp=p1.hp;
+        }
+      }
+      state.intel.x = s.intel.x; state.intel.y = s.intel.y; state.intel.taken = s.intel.t;
+      state.extractZone.x = s.extract.x; state.extractZone.y = s.extract.y; state.extractZone.w = s.extract.w; state.extractZone.h = s.extract.h; state.extractZone.active = s.extract.a;
+      state.noise = s.noise;
+    }
+    async function hostCreateOffer(){
+      await createPeer('host');
+      const pc = state.net.pc;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await new Promise(r => pc.onicecandidate = e => { if(!e.candidate) r(); });
+      const sdp = JSON.stringify(pc.localDescription);
+      document.getElementById('hostOffer').value = sdp;
+      toast('Offer created — copy it to your friend');
+    }
+    async function hostConnectWithAnswer(){
+      const ansStr = document.getElementById('hostAnswer').value.trim();
+      if (!ansStr) return toast('Paste client answer first');
+      const pc = state.net.pc; if (!pc) return toast('Create offer first');
+      await pc.setRemoteDescription(JSON.parse(ansStr));
+      toast('Connecting…');
+    }
+    async function clientCreateAnswer(){
+      const offerStr = document.getElementById('joinOffer').value.trim();
+      if (!offerStr) return toast('Paste the host offer first');
+      const pc = await createPeer('client');
+      await pc.setRemoteDescription(JSON.parse(offerStr));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await new Promise(r => pc.onicecandidate = e => { if(!e.candidate) r(); });
+      const sdp = JSON.stringify(pc.localDescription);
+      document.getElementById('joinAnswer').value = sdp;
+      try { await navigator.clipboard.writeText(sdp); toast('Answer copied to clipboard'); } catch {}
+    }
+
     // ================== PHYSICS / COLLISION ==================
     function moveWithColliders(obj, vx, vy){
       const tryMove = (dx,dy)=>{
@@ -261,13 +381,15 @@
       tryMove(vx*state.dt, 0); tryMove(0, vy*state.dt);
     }
 
-    // ================== ENEMY AI ==================
+    // ================== ENEMY AI (targets nearest of player/ally) ==================
     function updateEnemy(e){
-      const p = state.player; const toP = {x:p.x - e.x, y:p.y - e.y};
+      const p1 = state.player, p2 = state.ally;
+      const tgt = (!p2 || Math.hypot(p1.x-e.x, p1.y-e.y) <= Math.hypot(p2.x-e.x, p2.y-e.y)) ? p1 : p2;
+      const toP = {x:tgt.x - e.x, y:tgt.y - e.y};
       const angToP = Math.atan2(toP.y, toP.x); const angDiff = Math.atan2(Math.sin(angToP - e.angle), Math.cos(angToP - e.angle));
-      const see = (Math.abs(angDiff) < e.fov*0.5) && (Math.hypot(toP.x,toP.y) < e.viewDist) && lineOfSight(e, p, state.walls);
+      const see = (Math.abs(angDiff) < e.fov*0.5) && (Math.hypot(toP.x,toP.y) < e.viewDist) && lineOfSight(e, tgt, state.walls);
       const hear = (Math.hypot(toP.x,toP.y) < e.hear * (1 + state.noise*0.8));
-      if (see || hear) { e.state = 'hunt'; e.target = {x:p.x, y:p.y}; }
+      if (see || hear) { e.state = 'hunt'; e.target = {x:tgt.x, y:tgt.y}; }
 
       if (e.state==='patrol'){
         if (!e._patrol || Math.random()<0.01) e._patrol = { x: e.x + rand(-200,200), y: e.y + rand(-200,200) };
@@ -276,10 +398,10 @@
       }
 
       if (e.state==='hunt'){
-        const v = { x: p.x - e.x, y: p.y - e.y }; const d = Math.hypot(v.x,v.y);
+        const v = { x: tgt.x - e.x, y: tgt.y - e.y }; const d = Math.hypot(v.x,v.y);
         e.angle = Math.atan2(v.y,v.x);
         if (d>220) moveWithColliders(e, Math.cos(e.angle)*e.speed*0.7, Math.sin(e.angle)*e.speed*0.7);
-        e.fireCd -= state.dt; if (d<420 && lineOfSight(e, p, state.walls) && e.fireCd<=0){ shootFrom(e, e.angle, false); e.fireCd = 0.9 + Math.random()*0.5; }
+        e.fireCd -= state.dt; if (d<420 && lineOfSight(e, tgt, state.walls) && e.fireCd<=0){ shootFrom(e, e.angle, false); e.fireCd = 0.9 + Math.random()*0.5; }
       }
     }
 
@@ -352,12 +474,29 @@
         if (gp.buttons[0]?.pressed) tryInteract();
       }
 
+      // CLIENT: stream inputs to host
+      if (state.net.role === 'client' && state.net.connected){
+        sendJSON({type:'inp', inp:{ ax, ay, aim: aimAngle, shoot: !!state.mouse.down, interact: !!state.keys.has('KeyE') }});
+      }
+
       // PLAYER UPDATE
       const p = state.player; if (!p) return;
       const mag = Math.hypot(ax,ay) || 1; const vx = (ax/mag)*p.speed; const vy = (ay/mag)*p.speed;
       moveWithColliders(p, vx, vy);
 
       p.dir = aimAngle; if (state.mouse.down) tryShoot(p.dir);
+
+      // HOST: drive ally from client inputs
+      if (state.net.role === 'host' && state.net.connected && state.ally){
+        const i = state.net.clientInp; const a = state.ally;
+        const mag2 = Math.hypot(i.ax, i.ay) || 1; const vx2=(i.ax/mag2)*a.speed, vy2=(i.ay/mag2)*a.speed;
+        moveWithColliders(a, vx2, vy2); a.dir = i.aim;
+        if (i.shoot){
+          const wIdx=0; const w=state.weapons[wIdx]; const ammo=a.ammo[wIdx];
+          if (a.fireCd<=0 && ammo.mag>0){ shootFrom(a, a.dir, true, w); ammo.mag--; a.fireCd = 60/w.rpm; }
+        }
+        a.fireCd = Math.max(0, a.fireCd - state.dt);
+      }
 
       // Timers
       if (p.reloading){
@@ -368,40 +507,47 @@
       }
       p.fireCd = Math.max(0, p.fireCd - state.dt);
 
-      // Bullets
-      for (let i=state.bullets.length-1;i>=0;i--){
-        const b = state.bullets[i]; b.life -= state.dt; if (b.life<=0){ state.bullets.splice(i,1); continue; }
-        b.x += b.vx*state.dt; b.y += b.vy*state.dt;
-        for (const w of state.walls){ if (b.x> w.x && b.x< w.x+w.w && b.y> w.y && b.y< w.y+w.h){ state.bullets.splice(i,1); continue; } }
-        if (b.friendly){
-          for (let j=state.enemies.length-1;j>=0;j--){ const e = state.enemies[j]; if (Math.hypot(e.x-b.x, e.y-b.y) < e.r){ e.hp -= b.dmg; state.bullets.splice(i,1); if (e.hp<=0) state.enemies.splice(j,1); break; } }
-        } else {
-          if (Math.hypot(p.x-b.x, p.y-b.y) < p.r){ p.hp -= b.dmg; state.bullets.splice(i,1); if (p.hp<=0) gameOver(false); }
+      // Client role skips world sim; host/solo simulates
+      const isClient = (state.net.role === 'client' && state.net.connected);
+      if (!isClient){
+        // Bullets
+        for (let i=state.bullets.length-1;i>=0;i--){
+          const b = state.bullets[i]; b.life -= state.dt; if (b.life<=0){ state.bullets.splice(i,1); continue; }
+          b.x += b.vx*state.dt; b.y += b.vy*state.dt;
+          for (const w of state.walls){ if (b.x> w.x && b.x< w.x+w.w && b.y> w.y && b.y< w.y+w.h){ state.bullets.splice(i,1); continue; } }
+          if (b.friendly){
+            for (let j=state.enemies.length-1;j>=0;j--){ const e = state.enemies[j]; if (Math.hypot(e.x-b.x, e.y-b.y) < e.r){ e.hp -= b.dmg; state.bullets.splice(i,1); if (e.hp<=0) state.enemies.splice(j,1); break; } }
+          } else {
+            const hitLocal = Math.hypot(p.x-b.x, p.y-b.y) < p.r;
+            const hitAlly = state.ally && Math.hypot(state.ally.x-b.x, state.ally.y-b.y) < state.ally.r;
+            if (hitLocal){ p.hp -= b.dmg; state.bullets.splice(i,1); if (p.hp<=0) gameOver(false); }
+            else if (hitAlly){ state.ally.hp -= b.dmg; state.bullets.splice(i,1); }
+          }
         }
+
+        // Enemies
+        for (const e of state.enemies) updateEnemy(e);
+
+        // Intel
+        if (!state.intel.taken && dist(p, state.intel) < p.r + state.intel.r){ state.intel.taken=true; p.hasIntel=true; document.getElementById('intelText').textContent = `1 / 1`; state.extractZone.active=true; document.getElementById('extractMsg').style.display='block'; toast('Intel secured. Head to extract!'); }
+
+        // Extract
+        if (state.extractZone.active && p.x>state.extractZone.x && p.x<state.extractZone.x+state.extractZone.w && p.y>state.extractZone.y && p.y<state.extractZone.y+state.extractZone.h){ if (p.hasIntel) gameOver(true); }
+
+        // Noise
+        state.noise = Math.max(0, state.noise - state.dt*0.15);
+
+        // Camera with deadzone
+        const DZ_W = W * 0.45, DZ_H = H * 0.45;
+        const dzLeft = state.camera.x + (W - DZ_W)/2;
+        const dzRight = dzLeft + DZ_W;
+        const dzTop = state.camera.y + (H - DZ_H)/2;
+        const dzBottom = dzTop + DZ_H;
+        if (p.x < dzLeft) state.camera.x = clamp(p.x - DZ_W/2, 0, state.world.w - W);
+        else if (p.x > dzRight) state.camera.x = clamp(p.x + DZ_W/2 - W, 0, state.world.w - W);
+        if (p.y < dzTop) state.camera.y = clamp(p.y - DZ_H/2, 0, state.world.h - H);
+        else if (p.y > dzBottom) state.camera.y = clamp(p.y + DZ_H/2 - H, 0, state.world.h - H);
       }
-
-      // Enemies
-      for (const e of state.enemies) updateEnemy(e);
-
-      // Intel
-      if (!state.intel.taken && dist(p, state.intel) < p.r + state.intel.r){ state.intel.taken=true; p.hasIntel=true; document.getElementById('intelText').textContent = `1 / 1`; state.extractZone.active=true; document.getElementById('extractMsg').style.display='block'; toast('Intel secured. Head to extract!'); }
-
-      // Extract
-      if (state.extractZone.active && p.x>state.extractZone.x && p.x<state.extractZone.x+state.extractZone.w && p.y>state.extractZone.y && p.y<state.extractZone.y+state.extractZone.h){ if (p.hasIntel) gameOver(true); }
-
-      // Noise
-      state.noise = Math.max(0, state.noise - state.dt*0.15);
-
-      // Camera with deadzone
-      const DZ_W = W * 0.45, DZ_H = H * 0.45;
-      const dzLeft = state.camera.x + (W - DZ_W)/2;
-      const dzRight = dzLeft + DZ_W;
-      const dzTop = state.camera.y + (H - DZ_H)/2;
-      const dzBottom = dzTop + DZ_H;
-      if (p.x < dzLeft) state.camera.x = clamp(p.x - DZ_W/2, 0, state.world.w - W);
-      else if (p.x > dzRight) state.camera.x = clamp(p.x + DZ_W/2 - W, 0, state.world.w - W);
-      if (p.y < dzTop) state.camera.y = clamp(p.y - DZ_H/2, 0, state.world.h - H);
-      else if (p.y > dzBottom) state.camera.y = clamp(p.y + DZ_H/2 - H, 0, state.world.h - H);
 
       // Render
       const mouseWorld = { x: state.mouse.x + state.camera.x, y: state.mouse.y + state.camera.y };
@@ -412,6 +558,15 @@
       document.getElementById('hpBar').style.width = clamp(p.hp,0,100) + '%';
       document.getElementById('noiseBar').style.width = Math.round(state.noise*100) + '%';
       document.getElementById('enemyText').textContent = state.enemies.length.toString();
+
+      // HOST: periodic snapshot to client
+      if (state.net.role === 'host' && state.net.connected){
+        state.net.snapTimer += state.dt;
+        if (state.net.snapTimer > 0.1){
+          sendJSON(makeSnapshot());
+          state.net.snapTimer = 0;
+        }
+      }
     }
 
     function draw(hasLOS){
@@ -440,6 +595,7 @@
 
       // Player & Enemies
       const p = state.player; drawSoldier(p.x, p.y, p.dir, '#7cff6b');
+      if (state.ally){ drawSoldier(state.ally.x, state.ally.y, state.ally.dir, '#6bd1ff'); }
       for (const e of state.enemies){ drawSoldier(e.x, e.y, e.angle, '#ff6b6b'); }
 
       ctx.restore();
@@ -465,6 +621,7 @@
       if (!state.intel.taken){ mctx.fillStyle = '#3bd1ff'; mctx.fillRect(state.intel.x*scaleX-2, state.intel.y*scaleY-2, 4, 4); }
       mctx.fillStyle = '#ff6b6b'; for (const e of state.enemies){ mctx.fillRect(e.x*scaleX-1, e.y*scaleY-1, 2, 2);} 
       mctx.fillStyle = '#7cff6b'; const p = state.player; mctx.fillRect(p.x*scaleX-2, p.y*scaleY-2, 4, 4);
+      if (state.ally){ mctx.fillStyle = '#6bd1ff'; mctx.fillRect(state.ally.x*scaleX-2, state.ally.y*scaleY-2, 4, 4); }
     }
 
     function tryInteract(){ const p = state.player; if (!state.intel.taken && dist(p, state.intel) < p.r + state.intel.r + 4){ state.intel.taken=true; p.hasIntel=true; document.getElementById('intelText').textContent = `1 / 1`; state.extractZone.active=true; document.getElementById('extractMsg').style.display='block'; toast('Intel secured. Head to extract!'); } }
@@ -475,6 +632,24 @@
     document.getElementById('startBtn').addEventListener('click', ()=>{ setupLevel(); state.running=true; state.last=performance.now(); document.getElementById('menu').style.display='none'; canvas.focus(); requestAnimationFrame(step); });
     document.getElementById('howBtn').addEventListener('click', ()=>{ toast('Secure the Intel (blue), then reach the green extraction zone near spawn. Avoid patrols; shoot sparingly to keep noise low.'); });
     document.getElementById('gpBtn').addEventListener('click', ()=>{ const gp = readGamepad(); if (gp){ toast('Controller active. Left stick move, right stick aim, RT shoot, A interact.'); } else { toast('Press any button on your controller.'); } });
+
+    // Multiplayer modal open/close
+    document.getElementById('mpBtn').addEventListener('click', ()=>{ document.getElementById('mpModal').style.display='block'; });
+    document.getElementById('mpClose').addEventListener('click', ()=>{ document.getElementById('mpModal').style.display='none'; });
+
+    // Modal buttons
+    document.getElementById('hostCreate').addEventListener('click', hostCreateOffer);
+    document.getElementById('hostCopy').addEventListener('click', async ()=>{
+      const v=document.getElementById('hostOffer').value; if(!v) return toast('No offer yet');
+      try{ await navigator.clipboard.writeText(v); toast('Offer copied'); }catch{ toast('Copy failed — select & copy'); }
+    });
+    document.getElementById('hostConnect').addEventListener('click', hostConnectWithAnswer);
+
+    document.getElementById('joinCreate').addEventListener('click', clientCreateAnswer);
+    document.getElementById('joinCopy').addEventListener('click', async ()=>{
+      const v=document.getElementById('joinAnswer').value; if(!v) return toast('No answer yet');
+      try{ await navigator.clipboard.writeText(v); toast('Answer copied'); }catch{ toast('Copy failed — select & copy'); }
+    });
 
     // ================== DEV TESTS ==================
     function runTests(){
@@ -522,5 +697,48 @@
     setupLevel(); runTests(); draw(false);
   })();
   </script>
+
+  <!-- ===== Multiplayer Modal (Manual WebRTC) ===== -->
+  <div id="mpModal" style="display:none; position:fixed; inset:0; background:#0008; backdrop-filter: blur(2px);">
+    <div style="position:absolute; left:50%; top:50%; transform: translate(-50%,-50%); width:min(900px,92vw); background:#0f1935f0; border:1px solid #2a3f77; border-radius:16px; padding:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px">
+        <h2 style="margin:0; font-size:16px; letter-spacing:.08em; text-transform:uppercase">Multiplayer (P2P) — Manual Signaling</h2>
+        <button id="mpClose" class="btn">Close</button>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
+          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Host</h3>
+          <ol style="margin:0 0 8px 18px; color:#9fb2db">
+            <li>Click <strong>Create Offer</strong> then <strong>Copy Offer</strong>.</li>
+            <li>Send it to your friend (DM/Discord).</li>
+            <li>Paste their <em>Answer</em> below and press <strong>Connect</strong>.</li>
+          </ol>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px">
+            <button id="hostCreate" class="btn">Create Offer</button>
+            <button id="hostCopy" class="btn">Copy Offer</button>
+          </div>
+          <textarea id="hostOffer" placeholder="Host Offer (auto-filled)" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+          <div style="height:8px"></div>
+          <textarea id="hostAnswer" placeholder="Paste Client Answer here" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+          <div style="height:8px"></div>
+          <button id="hostConnect" class="btn play"><span class="dot"></span> Connect</button>
+        </div>
+        <div style="border:1px solid #2a3f77; border-radius:12px; padding:12px">
+          <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em">Join</h3>
+          <ol style="margin:0 0 8px 18px; color:#9fb2db">
+            <li>Paste the host's <em>Offer</em> below and click <strong>Create Answer</strong>.</li>
+            <li>Copy your <em>Answer</em> and send it back to the host.</li>
+          </ol>
+          <textarea id="joinOffer" placeholder="Paste Host Offer here" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0">
+            <button id="joinCreate" class="btn">Create Answer</button>
+            <button id="joinCopy" class="btn">Copy Answer</button>
+          </div>
+          <textarea id="joinAnswer" placeholder="Client Answer (auto-filled)" style="width:100%; height:120px; background:#0b1230; color:#e6f0ff; border:1px solid #253a73; border-radius:8px; padding:8px"></textarea>
+        </div>
+      </div>
+      <p style="margin:10px 0 0; color:#9fb2db; font-size:12px">Tip: This uses public STUN only. Some networks may block P2P connections without TURN.</p>
+    </div>
+  </div>
 </body>
 </html>

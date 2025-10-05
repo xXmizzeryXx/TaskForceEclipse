@@ -628,28 +628,57 @@
 
     function gameOver(won){ state.running=false; state.won=won; document.getElementById('menu').style.display='grid'; const t=document.querySelector('#menu .subtitle'); t.innerHTML = won? 'Extraction complete. Mission success. <strong>Play again?</strong>':'You were neutralized. <strong>Retry?</strong>'; }
 
-    // ================== UI BINDINGS ==================
-    document.getElementById('startBtn').addEventListener('click', ()=>{ setupLevel(); state.running=true; state.last=performance.now(); document.getElementById('menu').style.display='none'; canvas.focus(); requestAnimationFrame(step); });
-    document.getElementById('howBtn').addEventListener('click', ()=>{ toast('Secure the Intel (blue), then reach the green extraction zone near spawn. Avoid patrols; shoot sparingly to keep noise low.'); });
-    document.getElementById('gpBtn').addEventListener('click', ()=>{ const gp = readGamepad(); if (gp){ toast('Controller active. Left stick move, right stick aim, RT shoot, A interact.'); } else { toast('Press any button on your controller.'); } });
+   // ================== UI BINDINGS ==================
+function bindUI() {
+  const $ = id => document.getElementById(id);
 
-    // Multiplayer modal open/close
-    document.getElementById('mpBtn').addEventListener('click', ()=>{ document.getElementById('mpModal').style.display='block'; });
-    document.getElementById('mpClose').addEventListener('click', ()=>{ document.getElementById('mpModal').style.display='none'; });
+  // Top menu
+  $('#startBtn')?.addEventListener('click', ()=>{
+    setupLevel();
+    state.running = true;
+    state.last = performance.now();
+    $('#menu').style.display = 'none';
+    canvas.focus();
+    requestAnimationFrame(step);
+  });
 
-    // Modal buttons
-    document.getElementById('hostCreate').addEventListener('click', hostCreateOffer);
-    document.getElementById('hostCopy').addEventListener('click', async ()=>{
-      const v=document.getElementById('hostOffer').value; if(!v) return toast('No offer yet');
-      try{ await navigator.clipboard.writeText(v); toast('Offer copied'); }catch{ toast('Copy failed — select & copy'); }
-    });
-    document.getElementById('hostConnect').addEventListener('click', hostConnectWithAnswer);
+  $('#howBtn')?.addEventListener('click', ()=>{
+    toast('Secure the Intel (blue), then reach the green extraction zone near spawn. Avoid patrols; shoot sparingly to keep noise low.');
+  });
 
-    document.getElementById('joinCreate').addEventListener('click', clientCreateAnswer);
-    document.getElementById('joinCopy').addEventListener('click', async ()=>{
-      const v=document.getElementById('joinAnswer').value; if(!v) return toast('No answer yet');
-      try{ await navigator.clipboard.writeText(v); toast('Answer copied'); }catch{ toast('Copy failed — select & copy'); }
-    });
+  $('#gpBtn')?.addEventListener('click', ()=>{
+    const gp = readGamepad();
+    if (gp) toast('Controller active. Left stick move, right stick aim, RT shoot, A interact.');
+    else toast('Press any button on your controller.');
+  });
+
+  // Multiplayer modal open/close
+  $('#mpBtn')?.addEventListener('click', ()=>{ $('#mpModal').style.display = 'block'; });
+  $('#mpClose')?.addEventListener('click', ()=>{ $('#mpModal').style.display = 'none'; });
+
+  // Host side
+  $('#hostCreate')?.addEventListener('click', hostCreateOffer);
+  $('#hostCopy')?.addEventListener('click', async ()=>{
+    const v = $('#hostOffer').value;
+    if (!v) return toast('No offer yet');
+    try { await navigator.clipboard.writeText(v); toast('Offer copied'); }
+    catch { toast('Copy failed — select & copy'); }
+  });
+  $('#hostConnect')?.addEventListener('click', hostConnectWithAnswer);
+
+  // Client side
+  $('#joinCreate')?.addEventListener('click', clientCreateAnswer);
+  $('#joinCopy')?.addEventListener('click', async ()=>{
+    const v = $('#joinAnswer').value;
+    if (!v) return toast('No answer yet');
+    try { await navigator.clipboard.writeText(v); toast('Answer copied'); }
+    catch { toast('Copy failed — select & copy'); }
+  });
+}
+
+// Ensure elements exist before we bind
+document.addEventListener('DOMContentLoaded', bindUI);
+
 
     // ================== DEV TESTS ==================
     function runTests(){

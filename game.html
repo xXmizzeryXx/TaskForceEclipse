@@ -89,8 +89,8 @@
     <h2 class="subtitle">By Mizzery</h2>
     <p class="subtitle">Top-down tactical raid. Secure the <strong>Intel Drive</strong>, avoid patrols, and extract alive. Enemies adapt to your noise and tactics.</p>
     <div class="btns">
-      <button id="startBtn">New Operation</button>
-      <button id="mpBtn">Multiplayer (P2P)</button>
+      <button id="startBtn" onclick="__startGame()">New Operation</button>
+      <button id="mpBtn"   onclick="__openMP()">Multiplayer (P2P)</button>
       <button id="howBtn">How to Play</button>
       <button id="gpBtn">Detect Controller</button>
     </div>
@@ -733,6 +733,29 @@
 
   // Optional: warn in console if expected containers are missing
   ['menu','mpModal','game'].forEach(id=>{ if(!$(id)) console.warn(`Missing element #${id}`); });
+
+  // ----- Hard-wired fallbacks for buttons -----
+window.__startGame = function(){
+  try {
+    setupLevel();
+    state.running = true;
+    state.last = performance.now();
+    const menu = document.getElementById('menu');
+    if (menu) menu.style.display = 'none';
+    const cvs = document.getElementById('game');
+    if (cvs) cvs.focus();
+    requestAnimationFrame(step);
+  } catch (e) {
+    console.error(e);
+    toast('Start failed: ' + e.message);
+  }
+};
+
+window.__openMP = function(){
+  const modal = document.getElementById('mpModal');
+  if (modal) modal.style.display = 'block';
+  else toast('Multiplayer modal not found');
+};
 })();
 
 

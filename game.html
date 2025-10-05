@@ -672,17 +672,21 @@
 
     function gameOver(won){ state.running=false; state.won=won; document.getElementById('menu').style.display='grid'; const t=document.querySelector('#menu .subtitle'); t.innerHTML = won? 'Extraction complete. Mission success. <strong>Play again?</strong>':'You were neutralized. <strong>Retry?</strong>'; }
 
-    // ================== UI BINDINGS (robust + delegated) ==================
+    // ================== UI BINDINGS (null-safe) ==================
 (function bindUI(){
   const $ = id => document.getElementById(id);
+  const show = id => { const el = $(id); if (el) el.style.display = 'block'; };
+  const hide = id => { const el = $(id); if (el) el.style.display = 'none'; };
 
+  // Central actions
   const actions = {
     startBtn: () => {
       setupLevel();
       state.running = true;
       state.last = performance.now();
-      $('#menu').style.display = 'none';
-      canvas.focus();
+      hide('menu');              // null-safe
+      const cvs = $('game');     // focus only if canvas exists
+      if (cvs) cvs.focus();
       requestAnimationFrame(step);
     },
     howBtn: () => {
@@ -692,12 +696,12 @@
       const gp = readGamepad();
       toast(gp ? 'Controller active. Left stick move, right stick aim, RT shoot, A interact.' : 'Press any button on your controller.');
     },
-    mpBtn: () => { $('#mpModal').style.display = 'block'; },
-    mpClose: () => { $('#mpModal').style.display = 'none'; },
+    mpBtn: () => { show('mpModal'); },
+    mpClose: () => { hide('mpModal'); },
 
     hostCreate: hostCreateOffer,
     hostCopy: async () => {
-      const v = $('#hostOffer').value;
+      const v = $('hostOffer')?.value || '';
       if (!v) return toast('No offer yet');
       try { await navigator.clipboard.writeText(v); toast('Offer copied'); }
       catch { toast('Copy failed — select & copy'); }
@@ -706,26 +710,29 @@
 
     joinCreate: clientCreateAnswer,
     joinCopy: async () => {
-      const v = $('#joinAnswer').value;
+      const v = $('joinAnswer')?.value || '';
       if (!v) return toast('No answer yet');
       try { await navigator.clipboard.writeText(v); toast('Answer copied'); }
       catch { toast('Copy failed — select & copy'); }
     },
   };
 
-  // Attach directly if elements exist
-  Object.keys(actions).forEach(id => {
+  // Attach directly if element exists
+  for (const id in actions) {
     const el = $(id);
-    if (el) el.addEventListener('click', (e) => { e.preventDefault(); actions[id](); });
-  });
+    if (el) el.addEventListener('click', (e)=>{ e.preventDefault(); actions[id](); });
+  }
 
-  // Ultimate fallback: event delegation (works even if DOM moves)
-  document.addEventListener('click', (e) => {
+  // Fallback: delegated listener so clicks still work if DOM moves later
+  document.addEventListener('click', (e)=>{
     const el = e.target.closest('#startBtn,#howBtn,#gpBtn,#mpBtn,#mpClose,#hostCreate,#hostCopy,#hostConnect,#joinCreate,#joinCopy');
     if (!el) return;
-    const id = el.id;
-    if (actions[id]) { e.preventDefault(); actions[id](); }
+    const fn = actions[el.id];
+    if (fn) { e.preventDefault(); fn(); }
   }, true);
+
+  // Optional: warn in console if expected containers are missing
+  ['menu','mpModal','game'].forEach(id=>{ if(!$(id)) console.warn(`Missing element #${id}`); });
 })();
 
 

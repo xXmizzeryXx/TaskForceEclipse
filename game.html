@@ -6,14 +6,14 @@
   <title>Task Force: Eclipse — by Mizzery</title>
   <style>
     :root {
-  :    --bg; #0b1020;
-  :    --panel; #11192e;
-  :   --accent; #3bd1ff;
-  :    --accent-2; #7cff6b;
-  :    --danger; #ff5c5c;
-  :    --text; #e6f0ff;
-  :    --muted; #93a4c1;
-  :  }
+      --bg: #0b1020;
+      --panel: #11192e;
+      --accent: #3bd1ff;
+      --accent-2: #7cff6b;
+      --danger: #ff5c5c;
+      --text: #e6f0ff;
+      --muted: #93a4c1;
+    }
     html, body { margin: 0; height: 100%; background: radial-gradient(1000px 600px at 70% 30%, #0f1731, var(--bg)); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color: var(--text); overflow: hidden; }
     .hud { position: fixed; inset: 0; pointer-events: none; }
     .panel { position: absolute; left: 16px; top: 16px; background: #0f1935aa; border: 1px solid #2a355b; border-radius: 12px; padding: 10px 12px; backdrop-filter: blur(4px); font-size: 12px; color: var(--muted); }
@@ -139,7 +139,7 @@
       </div>
       <p style="margin:10px 0 0; color:#9fb2db; font-size:12px">Tip: This uses public STUN only. Some networks may block P2P connections without TURN.</p>
     </div>
-  </div>
+    </div>
 
     <div id="optModal" style="display:none; position:fixed; inset:0; background:#0008; backdrop-filter: blur(2px); z-index:58;">
     <div style="position:absolute; left:50%; top:50%; transform: translate(-50%,-50%); width:min(720px,92vw); background:#0f1935f0; border:1px solid #2a3f77; border-radius:16px; padding:16px;">
@@ -343,8 +343,7 @@
       let tries = 0;
       while (state.enemies.length < enemyCount && tries < 300){
         tries++;
-        // FIX: Using rand() and multiplication since rng2 is not defined here.
-        // rand(a, b) is defined as 'a + Math.random()*(b-a)' which is safe.
+        // FIX: Using Math.random() directly for enemy positions (since rng2 was out of scope)
         const ex = 100 + Math.floor(Math.random() * (state.world.w - 200));
         const ey = 100 + Math.floor(Math.random() * (state.world.h - 200));
         

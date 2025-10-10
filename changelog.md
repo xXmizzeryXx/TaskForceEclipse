@@ -2,6 +2,11 @@
 
 All notable changes to Task Force: Eclipse will be documented in this file.
 
+## [Beta v0.2]
+
+- Updated Enemy Spawn System
+- Updated Enemy AI System
+
 ## [Beta v0.1]
 
 - Added multiplayer system for online co-op and PvP gameplay.
